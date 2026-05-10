@@ -30,7 +30,7 @@ struct SplashView: View {
                         .scaleEffect(logoScale)
 
                     VStack(spacing: 6) {
-                        Text("OFFROAD")
+                        Text("OffRoad")
                             .font(.system(size: 34, weight: .black))
                             .tracking(2)
 

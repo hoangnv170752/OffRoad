@@ -9,9 +9,13 @@ import SwiftUI
 
 @main
 struct offroadApp: App {
+    @State private var appSettings = AppSettings()
+
     var body: some Scene {
         WindowGroup {
             SplashView()
+                .preferredColorScheme(appSettings.theme.colorScheme)
+                .environment(appSettings)
         }
     }
 }

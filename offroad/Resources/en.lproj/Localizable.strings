@@ -1,0 +1,54 @@
+/* Home */
+"Home" = "Home";
+"Offline. Private. Yours." = "Offline. Private. Yours.";
+"Connected" = "Connected";
+"Scanning..." = "Scanning...";
+"BT Off" = "BT Off";
+"No Permission" = "No Permission";
+"Unavailable" = "Unavailable";
+
+/* Privacy Banner */
+"Offline & Private" = "Offline & Private";
+"Messages are stored only\non your phone and your\npartner's." = "Messages are stored only\non your phone and your\npartner's.";
+
+/* Recent Chats */
+"Recent Chats" = "Recent Chats";
+"See All" = "See All";
+
+/* Nearby Devices */
+"Nearby Devices" = "Nearby Devices";
+"Add / Scan" = "Add / Scan";
+"QR or Invite" = "QR or Invite";
+
+/* Safe Vault */
+"My Safe Vault" = "My Safe Vault";
+"End-to-end encrypted" = "End-to-end encrypted";
+"Open" = "Open";
+
+/* Chats */
+"Chats" = "Chats";
+"Type a message..." = "Type a message...";
+"Messages are end-to-end encrypted" = "Messages are end-to-end encrypted";
+"Connect" = "Connect";
+
+/* Contacts */
+"Contacts" = "Contacts";
+"Scanning for nearby devices..." = "Scanning for nearby devices...";
+"No devices found" = "No devices found";
+"Scan Again" = "Scan Again";
+"Bluetooth Permission Required" = "Bluetooth Permission Required";
+"Bluetooth is Off" = "Bluetooth is Off";
+"Open Settings" = "Open Settings";
+
+/* Settings */
+"Settings" = "Settings";
+"Appearance" = "Appearance";
+"Choose how OffRoad looks on your device." = "Choose how OffRoad looks on your device.";
+"System" = "System";
+"Light" = "Light";
+"Dark" = "Dark";
+"Language" = "Language";
+"Changing language will take full effect after restarting the app." = "Changing language will take full effect after restarting the app.";
+"About" = "About";
+"Version" = "Version";
+"Build" = "Build";

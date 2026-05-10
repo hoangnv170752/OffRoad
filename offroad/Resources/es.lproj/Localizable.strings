@@ -1,0 +1,54 @@
+/* Home */
+"Home" = "Inicio";
+"Offline. Private. Yours." = "Sin conexión. Privado. Tuyo.";
+"Connected" = "Conectado";
+"Scanning..." = "Buscando...";
+"BT Off" = "BT apagado";
+"No Permission" = "Sin permiso";
+"Unavailable" = "No disponible";
+
+/* Privacy Banner */
+"Offline & Private" = "Sin conexión y privado";
+"Messages are stored only\non your phone and your\npartner's." = "Los mensajes se almacenan\nsolo en tu teléfono y\nel de tu pareja.";
+
+/* Recent Chats */
+"Recent Chats" = "Chats recientes";
+"See All" = "Ver todo";
+
+/* Nearby Devices */
+"Nearby Devices" = "Dispositivos cercanos";
+"Add / Scan" = "Agregar / Escanear";
+"QR or Invite" = "QR o invitar";
+
+/* Safe Vault */
+"My Safe Vault" = "Mi bóveda segura";
+"End-to-end encrypted" = "Cifrado de extremo a extremo";
+"Open" = "Abrir";
+
+/* Chats */
+"Chats" = "Chats";
+"Type a message..." = "Escribe un mensaje...";
+"Messages are end-to-end encrypted" = "Los mensajes están cifrados de extremo a extremo";
+"Connect" = "Conectar";
+
+/* Contacts */
+"Contacts" = "Contactos";
+"Scanning for nearby devices..." = "Buscando dispositivos cercanos...";
+"No devices found" = "No se encontraron dispositivos";
+"Scan Again" = "Escanear de nuevo";
+"Bluetooth Permission Required" = "Se requiere permiso de Bluetooth";
+"Bluetooth is Off" = "Bluetooth desactivado";
+"Open Settings" = "Abrir ajustes";
+
+/* Settings */
+"Settings" = "Ajustes";
+"Appearance" = "Apariencia";
+"Choose how OffRoad looks on your device." = "Elige cómo se ve OffRoad en tu dispositivo.";
+"System" = "Sistema";
+"Light" = "Claro";
+"Dark" = "Oscuro";
+"Language" = "Idioma";
+"Changing language will take full effect after restarting the app." = "El cambio de idioma tendrá efecto completo después de reiniciar la app.";
+"About" = "Acerca de";
+"Version" = "Versión";
+"Build" = "Build";

@@ -7,44 +7,47 @@
 
 import SwiftUI
 
-struct ContentView: View {
-    @State private var selectedTab: Tab = .home
+enum AppTab: String {
+    case home, chats, contacts, settings
+}
 
-    enum Tab: String {
-        case home, chats, contacts, settings
-    }
+struct ContentView: View {
+    @State private var selectedTab: AppTab = .home
+    @StateObject private var bluetoothManager = BluetoothManager()
+    @Environment(AppSettings.self) var appSettings
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            HomeView()
+            HomeView(selectedTab: $selectedTab)
                 .tabItem {
                     Image(systemName: "house.fill")
-                    Text("Home")
+                    Text(appSettings.localized("Home"))
                 }
-                .tag(Tab.home)
+                .tag(AppTab.home)
 
             ChatsView()
                 .tabItem {
                     Image(systemName: "bubble.left.and.bubble.right.fill")
-                    Text("Chats")
+                    Text(appSettings.localized("Chats"))
                 }
-                .tag(Tab.chats)
+                .tag(AppTab.chats)
 
             ContactsView()
                 .tabItem {
                     Image(systemName: "person.2.fill")
-                    Text("Contacts")
+                    Text(appSettings.localized("Contacts"))
                 }
-                .tag(Tab.contacts)
+                .tag(AppTab.contacts)
 
             SettingsView()
                 .tabItem {
                     Image(systemName: "gearshape.fill")
-                    Text("Settings")
+                    Text(appSettings.localized("Settings"))
                 }
-                .tag(Tab.settings)
+                .tag(AppTab.settings)
         }
         .tint(Color(red: 0.15, green: 0.35, blue: 0.25))
+        .environmentObject(bluetoothManager)
     }
 }
 
