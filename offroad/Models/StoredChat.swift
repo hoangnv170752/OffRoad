@@ -1,10 +1,3 @@
-//
-//  StoredChat.swift
-//  offroad
-//
-//  Created by Codex on 13/5/26.
-//
-
 import Foundation
 
 struct StoredConversation: Codable, Identifiable, Hashable {
