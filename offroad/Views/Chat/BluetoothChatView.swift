@@ -5,6 +5,7 @@ struct BluetoothChatView: View {
     @EnvironmentObject private var bluetoothManager: BluetoothManager
     @EnvironmentObject private var chatStore: ChatStore
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.hideTabBar) private var hideTabBar
     @State private var messageText = ""
 
     private var messages: [Message] {
@@ -33,7 +34,14 @@ struct BluetoothChatView: View {
             }
         }
         .onAppear {
+            withAnimation { hideTabBar.wrappedValue = true }
             bluetoothManager.connect(to: device)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                bluetoothManager.sendConnectRequest()
+            }
+        }
+        .onDisappear {
+            withAnimation { hideTabBar.wrappedValue = false }
         }
         .alert("Bluetooth Error", isPresented: Binding(
             get: { bluetoothManager.lastErrorMessage != nil },

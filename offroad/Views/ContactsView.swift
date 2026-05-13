@@ -77,11 +77,15 @@ struct ContactsView: View {
         ScrollView {
             LazyVStack(spacing: 0) {
                 ForEach(bluetoothManager.discoveredDevices) { device in
-                    DeviceRow(device: device)
+                    NavigationLink(destination: BluetoothChatView(device: device)) {
+                        DeviceRow(device: device)
+                    }
+                    .buttonStyle(.plain)
                     Divider()
                         .padding(.leading, 72)
                 }
             }
+            .padding(.bottom, 100)
         }
     }
 
@@ -216,17 +220,15 @@ struct DeviceRow: View {
 
             Spacer()
 
-            Button(action: {}) {
-                Text("Connect")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(Color(red: 0.15, green: 0.40, blue: 0.30))
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 6)
-                    .background(
-                        Capsule()
-                            .strokeBorder(Color(red: 0.15, green: 0.40, blue: 0.30), lineWidth: 1.5)
-                    )
-            }
+            Text("Connect")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(Color(red: 0.15, green: 0.40, blue: 0.30))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule()
+                        .strokeBorder(Color(red: 0.15, green: 0.40, blue: 0.30), lineWidth: 1.5)
+                )
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 12)

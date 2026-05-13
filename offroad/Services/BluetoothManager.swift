@@ -20,6 +20,8 @@ class BluetoothManager: NSObject, ObservableObject {
     @Published var activePeerName: String?
     @Published var activePeerId: UUID?
     @Published var lastErrorMessage: String?
+    @Published var incomingRequest: IncomingConnectionRequest?
+    @Published var shouldNavigateToChat: DiscoveredDevice?
 
     /// Persistent encrypted store. Set by the host once `BluetoothManager` is created.
     weak var chatStore: ChatStore?
@@ -31,9 +33,14 @@ class BluetoothManager: NSObject, ObservableObject {
     private var activePeripheral: CBPeripheral?
     private var activeWritableCharacteristic: CBCharacteristic?
     private var transferCharacteristic: CBMutableCharacteristic?
+    private var recentPayloadHashes: [Int: Date] = [:]
 
     private let serviceUUID = CBUUID(string: "A0E6F0B3-7D58-4F43-85B2-D441E61A4F11")
     private let characteristicUUID = CBUUID(string: "CA6D76C5-CE1A-4B1A-90A3-80EA499D500E")
+
+    private let controlPrefix = "__CTRL:"
+    private let connectRequestTag = "CONNECT_REQ"
+    private let connectAcceptTag = "CONNECT_ACK"
 
     override init() {
         super.init()
@@ -48,12 +55,12 @@ class BluetoothManager: NSObject, ObservableObject {
         isScanning = true
         lastErrorMessage = nil
         centralManager.scanForPeripherals(
-            withServices: [serviceUUID],
-            options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
+            withServices: nil,
+            options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
         )
 
         scanTimer?.invalidate()
-        scanTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: false) { [weak self] _ in
+        scanTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: false) { [weak self] _ in
             self?.stopScanning()
         }
     }
@@ -142,7 +149,90 @@ class BluetoothManager: NSObject, ObservableObject {
 
     private func handleIncomingPayload(_ data: Data) {
         guard let text = String(data: data, encoding: .utf8), !text.isEmpty else { return }
+
+        let hash = text.hashValue
+        let now = Date()
+        recentPayloadHashes = recentPayloadHashes.filter { now.timeIntervalSince($0.value) < 2 }
+        if recentPayloadHashes[hash] != nil { return }
+        recentPayloadHashes[hash] = now
+
+        if text.hasPrefix(controlPrefix) {
+            handleControlMessage(String(text.dropFirst(controlPrefix.count)))
+            return
+        }
+
         appendIncomingMessage(text)
+    }
+
+    private func handleControlMessage(_ message: String) {
+        let parts = message.split(separator: "|", maxSplits: 1)
+        guard let tag = parts.first else { return }
+        let peerName = parts.count > 1 ? String(parts[1]) : "Nearby device"
+
+        DispatchQueue.main.async {
+            if tag == Substring(self.connectRequestTag) {
+                let request = IncomingConnectionRequest(
+                    peerName: peerName,
+                    peerId: self.activePeripheral?.identifier
+                )
+                self.incomingRequest = request
+            } else if tag == Substring(self.connectAcceptTag) {
+                if let peerId = self.activePeerId ?? self.activePeripheral?.identifier {
+                    let device = DiscoveredDevice(
+                        peripheralId: peerId,
+                        name: peerName,
+                        rssi: -50,
+                        distance: "< 1 m",
+                        lastSeen: Date(),
+                        isConnected: true
+                    )
+                    self.shouldNavigateToChat = device
+                }
+            }
+        }
+    }
+
+    func sendConnectRequest() {
+        let deviceName = UIDevice.current.name
+        let payload = Data("\(controlPrefix)\(connectRequestTag)|\(deviceName)".utf8)
+
+        if let activePeripheral, let activeWritableCharacteristic {
+            let writeType: CBCharacteristicWriteType = activeWritableCharacteristic.properties.contains(.write) ? .withResponse : .withoutResponse
+            activePeripheral.writeValue(payload, for: activeWritableCharacteristic, type: writeType)
+        }
+        if let transferCharacteristic {
+            peripheralManager.updateValue(payload, for: transferCharacteristic, onSubscribedCentrals: nil)
+        }
+    }
+
+    func acceptIncomingConnection() {
+        let deviceName = UIDevice.current.name
+        let payload = Data("\(controlPrefix)\(connectAcceptTag)|\(deviceName)".utf8)
+
+        if let activePeripheral, let activeWritableCharacteristic {
+            let writeType: CBCharacteristicWriteType = activeWritableCharacteristic.properties.contains(.write) ? .withResponse : .withoutResponse
+            activePeripheral.writeValue(payload, for: activeWritableCharacteristic, type: writeType)
+        }
+        if let transferCharacteristic {
+            peripheralManager.updateValue(payload, for: transferCharacteristic, onSubscribedCentrals: nil)
+        }
+
+        if let request = incomingRequest, let peerId = request.peerId ?? activePeerId ?? activePeripheral?.identifier {
+            let device = DiscoveredDevice(
+                peripheralId: peerId,
+                name: request.peerName,
+                rssi: -50,
+                distance: "< 1 m",
+                lastSeen: Date(),
+                isConnected: true
+            )
+            shouldNavigateToChat = device
+        }
+        incomingRequest = nil
+    }
+
+    func declineIncomingConnection() {
+        incomingRequest = nil
     }
 
     private func configurePeripheralService() {
@@ -222,9 +312,10 @@ extension BluetoothManager: CBCentralManagerDelegate {
     ) {
         let name = peripheral.name ?? advertisementData[CBAdvertisementDataLocalNameKey] as? String
         guard let deviceName = name, !deviceName.isEmpty else { return }
+        let rssiValue = RSSI.intValue
+        guard rssiValue != 127 else { return }
         discoveredPeripherals[peripheral.identifier] = peripheral
 
-        let rssiValue = RSSI.intValue
         let distance = estimateDistance(rssi: rssiValue)
 
         DispatchQueue.main.async {
@@ -376,7 +467,13 @@ extension BluetoothManager: CBPeripheralManagerDelegate {
 
 // MARK: - DiscoveredDevice Model
 
-struct DiscoveredDevice: Identifiable {
+struct IncomingConnectionRequest: Identifiable {
+    let id = UUID()
+    let peerName: String
+    let peerId: UUID?
+}
+
+struct DiscoveredDevice: Identifiable, Equatable {
     var id: UUID { peripheralId }
     let peripheralId: UUID
     var name: String

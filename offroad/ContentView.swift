@@ -11,9 +11,22 @@ enum AppTab: String {
     case home, chats, contacts, settings
 }
 
+struct HideTabBarKey: EnvironmentKey {
+    static let defaultValue: Binding<Bool> = .constant(false)
+}
+
+extension EnvironmentValues {
+    var hideTabBar: Binding<Bool> {
+        get { self[HideTabBarKey.self] }
+        set { self[HideTabBarKey.self] = newValue }
+    }
+}
+
 struct ContentView: View {
     @State private var selectedTab: AppTab = .home
     @State private var isFAQSearchPresented = false
+    @State private var chatDevice: DiscoveredDevice?
+    @State private var hideTabBar = false
     @StateObject private var chatStore: ChatStore
     @StateObject private var bluetoothManager: BluetoothManager
     @Environment(AppSettings.self) private var appSettings
@@ -48,18 +61,51 @@ struct ContentView: View {
         .environmentObject(bluetoothManager)
         .environmentObject(chatStore)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            BottomTabBar(
-                selectedTab: $selectedTab,
-                onSearchTap: { isFAQSearchPresented = true }
-            )
-            .background(
-                Color(.systemGroupedBackground)
-                    .opacity(0.001)
-                    .ignoresSafeArea(edges: .bottom)
-            )
+            if !hideTabBar {
+                BottomTabBar(
+                    selectedTab: $selectedTab,
+                    onSearchTap: { isFAQSearchPresented = true }
+                )
+                .background(
+                    Color(.systemGroupedBackground)
+                        .opacity(0.001)
+                        .ignoresSafeArea(edges: .bottom)
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
+        .environment(\.hideTabBar, $hideTabBar)
         .sheet(isPresented: $isFAQSearchPresented) {
             FAQSearchView()
+        }
+        .alert(
+            "Connection Request",
+            isPresented: Binding(
+                get: { bluetoothManager.incomingRequest != nil },
+                set: { if !$0 { bluetoothManager.incomingRequest = nil } }
+            )
+        ) {
+            Button("Accept") {
+                bluetoothManager.acceptIncomingConnection()
+            }
+            Button("Decline", role: .cancel) {
+                bluetoothManager.declineIncomingConnection()
+            }
+        } message: {
+            Text("\(bluetoothManager.incomingRequest?.peerName ?? "A device") wants to chat with you via Bluetooth.")
+        }
+        .sheet(item: $chatDevice) { device in
+            NavigationStack {
+                BluetoothChatView(device: device)
+                    .environmentObject(bluetoothManager)
+                    .environmentObject(chatStore)
+            }
+        }
+        .onChange(of: bluetoothManager.shouldNavigateToChat) {
+            if let device = bluetoothManager.shouldNavigateToChat {
+                chatDevice = device
+                bluetoothManager.shouldNavigateToChat = nil
+            }
         }
     }
 }

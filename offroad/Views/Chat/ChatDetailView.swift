@@ -12,6 +12,7 @@ struct ChatDetailView: View {
     @EnvironmentObject private var chatStore: ChatStore
     @EnvironmentObject private var bluetoothManager: BluetoothManager
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.hideTabBar) private var hideTabBar
     @State private var messageText = ""
 
     private var stored: StoredConversation? {
@@ -43,6 +44,12 @@ struct ChatDetailView: View {
             inputBar
         }
         .navigationBarHidden(true)
+        .onAppear {
+            withAnimation { hideTabBar.wrappedValue = true }
+        }
+        .onDisappear {
+            withAnimation { hideTabBar.wrappedValue = false }
+        }
     }
 
     // MARK: - Header
