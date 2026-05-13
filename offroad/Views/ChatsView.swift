@@ -6,11 +6,13 @@
 //
 
 import SwiftUI
+import Combine
 
 struct ChatsView: View {
     @Environment(AppSettings.self) private var appSettings
     @EnvironmentObject private var chatStore: ChatStore
     @EnvironmentObject private var bluetoothManager: BluetoothManager
+    @State private var now = Date()
 
     private static let relativeFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
@@ -41,7 +43,7 @@ struct ChatsView: View {
                         StoredConversationRow(
                             stored: stored,
                             isOnline: isPeerOnline(stored.id),
-                            timeString: Self.relativeFormatter.localizedString(for: stored.lastUpdated, relativeTo: Date())
+                            timeString: relativeTimeString(for: stored.lastUpdated, relativeTo: now)
                         )
                     }
                     .buttonStyle(.plain)
@@ -55,6 +57,9 @@ struct ChatsView: View {
         }
         .navigationDestination(for: UUID.self) { peerId in
             ChatDetailView(peerId: peerId)
+        }
+        .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { value in
+            now = value
         }
     }
 
@@ -78,6 +83,13 @@ struct ChatsView: View {
 
     private func isPeerOnline(_ peerId: UUID) -> Bool {
         bluetoothManager.discoveredDevices.contains(where: { $0.peripheralId == peerId })
+    }
+
+    private func relativeTimeString(for date: Date, relativeTo now: Date) -> String {
+        if abs(now.timeIntervalSince(date)) < 1 {
+            return "Just now"
+        }
+        return Self.relativeFormatter.localizedString(for: date, relativeTo: now)
     }
 }
 

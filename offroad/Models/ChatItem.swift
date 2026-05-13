@@ -8,13 +8,31 @@
 import SwiftUI
 
 struct ChatItem: Identifiable {
-    let id = UUID()
+    let id: UUID
     let name: String
     let lastMessage: String
     let time: String
     let unreadCount: Int
     let avatarColor: Color
     let isOnline: Bool
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        lastMessage: String,
+        time: String,
+        unreadCount: Int,
+        avatarColor: Color,
+        isOnline: Bool
+    ) {
+        self.id = id
+        self.name = name
+        self.lastMessage = lastMessage
+        self.time = time
+        self.unreadCount = unreadCount
+        self.avatarColor = avatarColor
+        self.isOnline = isOnline
+    }
 }
 
 extension ChatItem {

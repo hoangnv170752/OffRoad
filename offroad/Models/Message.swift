@@ -13,19 +13,22 @@ struct Message: Identifiable, Codable, Hashable {
     let isFromMe: Bool
     let timestamp: Date
     let isImage: Bool
+    let attachmentFileName: String?
 
     init(
         id: UUID = UUID(),
         text: String,
         isFromMe: Bool,
         timestamp: Date = Date(),
-        isImage: Bool = false
+        isImage: Bool = false,
+        attachmentFileName: String? = nil
     ) {
         self.id = id
         self.text = text
         self.isFromMe = isFromMe
         self.timestamp = timestamp
         self.isImage = isImage
+        self.attachmentFileName = attachmentFileName
     }
 }
 

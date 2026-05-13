@@ -10,11 +10,11 @@ import SwiftUI
 struct MessageBubbleView: View {
     let message: Message
 
-    private var timeString: String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm"
-        return formatter.string(from: message.timestamp)
-    }
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter
+    }()
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 8) {
@@ -27,10 +27,12 @@ struct MessageBubbleView: View {
                     textBubble
                 }
 
-                Text(timeString)
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 4)
+                TimelineView(.periodic(from: .now, by: 30)) { context in
+                    Text(Self.relativeTimeString(for: message.timestamp, relativeTo: context.date))
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 4)
+                }
             }
 
             if !message.isFromMe { Spacer(minLength: 60) }
@@ -52,6 +54,31 @@ struct MessageBubbleView: View {
     }
 
     private var imageBubble: some View {
+        Group {
+            if let fileName = message.attachmentFileName {
+                AsyncImage(url: ChatAttachmentStore.shared.fileURL(fileName: fileName)) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    case .failure:
+                        placeholderImageBubble
+                    case .empty:
+                        placeholderImageBubble
+                    @unknown default:
+                        placeholderImageBubble
+                    }
+                }
+            } else {
+                placeholderImageBubble
+            }
+        }
+        .frame(width: 200, height: 150)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+
+    private var placeholderImageBubble: some View {
         RoundedRectangle(cornerRadius: 16)
             .fill(
                 LinearGradient(
@@ -60,13 +87,18 @@ struct MessageBubbleView: View {
                     endPoint: .bottomTrailing
                 )
             )
-            .frame(width: 200, height: 150)
             .overlay(
                 Image(systemName: "photo.fill")
                     .font(.system(size: 40))
                     .foregroundColor(.white.opacity(0.7))
             )
-            .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+
+    private static func relativeTimeString(for date: Date, relativeTo now: Date) -> String {
+        if abs(now.timeIntervalSince(date)) < 1 {
+            return "Just now"
+        }
+        return relativeFormatter.localizedString(for: date, relativeTo: now)
     }
 }
 

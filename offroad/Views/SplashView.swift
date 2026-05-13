@@ -22,7 +22,7 @@ struct SplashView: View {
                     .ignoresSafeArea()
 
                 VStack(spacing: 20) {
-                    Image("OffroadLogo")
+                    Image("Image")
                         .resizable()
                         .scaledToFit()
                         .frame(width: 160, height: 160)

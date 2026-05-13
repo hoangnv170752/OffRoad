@@ -9,6 +9,7 @@ import Foundation
 import CoreBluetooth
 import Combine
 import SwiftUI
+import UIKit
 
 class BluetoothManager: NSObject, ObservableObject {
     @Published var discoveredDevices: [DiscoveredDevice] = []
@@ -31,9 +32,14 @@ class BluetoothManager: NSObject, ObservableObject {
     private var scanTimer: Timer?
     private var discoveredPeripherals: [UUID: CBPeripheral] = [:]
     private var activePeripheral: CBPeripheral?
+    private var pendingDeviceToConnect: DiscoveredDevice?
     private var activeWritableCharacteristic: CBCharacteristic?
     private var transferCharacteristic: CBMutableCharacteristic?
     private var recentPayloadHashes: [Int: Date] = [:]
+    private var didSendConnectRequestForSession = false
+    private var didReceiveConnectRequestForSession = false
+    private var isChatSessionEstablished = false
+    private var incomingImageBuffers: [UUID: IncomingImageBuffer] = [:]
 
     private let serviceUUID = CBUUID(string: "A0E6F0B3-7D58-4F43-85B2-D441E61A4F11")
     private let characteristicUUID = CBUUID(string: "CA6D76C5-CE1A-4B1A-90A3-80EA499D500E")
@@ -41,6 +47,11 @@ class BluetoothManager: NSObject, ObservableObject {
     private let controlPrefix = "__CTRL:"
     private let connectRequestTag = "CONNECT_REQ"
     private let connectAcceptTag = "CONNECT_ACK"
+    private let imageBeginTag = "IMAGE_BEGIN"
+    private let imageChunkTag = "IMAGE_CHUNK"
+    private let imageEndTag = "IMAGE_END"
+    private let maxImagePayloadBytes = 45_000
+    private let imageChunkSize = 120
 
     override init() {
         super.init()
@@ -85,10 +96,17 @@ class BluetoothManager: NSObject, ObservableObject {
             return
         }
 
-        if activePeripheral?.identifier != peripheral.identifier, let activePeripheral {
-            centralManager.cancelPeripheralConnection(activePeripheral)
+        if activePeerId != device.peripheralId {
+            resetHandshakeState()
         }
 
+        if activePeripheral?.identifier != peripheral.identifier, let activePeripheral {
+            pendingDeviceToConnect = device
+            centralManager.cancelPeripheralConnection(activePeripheral)
+            return
+        }
+
+        pendingDeviceToConnect = nil
         activePeerName = device.name
         activePeerId = device.peripheralId
         activePeripheral = peripheral
@@ -98,6 +116,7 @@ class BluetoothManager: NSObject, ObservableObject {
     }
 
     func disconnect() {
+        pendingDeviceToConnect = nil
         if let activePeripheral {
             centralManager.cancelPeripheralConnection(activePeripheral)
         }
@@ -111,20 +130,54 @@ class BluetoothManager: NSObject, ObservableObject {
         let payload = Data(trimmed.utf8)
         appendOutgoingMessage(trimmed)
 
-        var delivered = false
-        if let activePeripheral, let activeWritableCharacteristic {
-            let writeType: CBCharacteristicWriteType = activeWritableCharacteristic.properties.contains(.write) ? .withResponse : .withoutResponse
-            activePeripheral.writeValue(payload, for: activeWritableCharacteristic, type: writeType)
-            delivered = true
-        }
-
-        if let transferCharacteristic {
-            let didNotify = peripheralManager.updateValue(payload, for: transferCharacteristic, onSubscribedCentrals: nil)
-            delivered = delivered || didNotify
-        }
+        let delivered = transmitPayload(payload)
 
         if !delivered {
             lastErrorMessage = "No active Bluetooth connection."
+        }
+    }
+
+    func sendImage(_ rawImageData: Data) {
+        guard isConnected else {
+            lastErrorMessage = "No active Bluetooth connection."
+            return
+        }
+
+        guard let payloadImageData = prepareImagePayload(from: rawImageData) else {
+            lastErrorMessage = "Image is too large to send over Bluetooth."
+            return
+        }
+
+        let messageId = UUID()
+        let fileName = "img-\(messageId.uuidString).jpg"
+        do {
+            _ = try ChatAttachmentStore.shared.save(data: payloadImageData, suggestedFileName: fileName)
+        } catch {
+            lastErrorMessage = "Failed to save image locally."
+            return
+        }
+
+        let base64 = payloadImageData.base64EncodedString()
+        let chunks = base64.chunked(by: imageChunkSize)
+        guard !chunks.isEmpty else {
+            lastErrorMessage = "Failed to encode image payload."
+            return
+        }
+
+        let begin = "\(controlPrefix)\(imageBeginTag)|\(messageId.uuidString)|jpg|\(chunks.count)"
+        var controlMessages: [String] = [begin]
+        controlMessages.append(
+            contentsOf: chunks.enumerated().map { index, chunk in
+                "\(controlPrefix)\(imageChunkTag)|\(messageId.uuidString)|\(index)|\(chunk)"
+            }
+        )
+        controlMessages.append("\(controlPrefix)\(imageEndTag)|\(messageId.uuidString)")
+
+        let delivered = transmitControlMessages(controlMessages)
+        if delivered {
+            appendOutgoingImageMessage(fileName: fileName, messageId: messageId)
+        } else {
+            lastErrorMessage = "Failed to send image over Bluetooth."
         }
     }
 
@@ -136,15 +189,81 @@ class BluetoothManager: NSObject, ObservableObject {
         persistMessage(text: text, isFromMe: false)
     }
 
-    private func persistMessage(text: String, isFromMe: Bool) {
+    private func appendOutgoingImageMessage(fileName: String, messageId: UUID) {
+        persistMessage(
+            id: messageId,
+            text: "🖼 Photo",
+            isFromMe: true,
+            isImage: true,
+            attachmentFileName: fileName
+        )
+    }
+
+    private func appendIncomingImageMessage(fileName: String, messageId: UUID) {
+        persistMessage(
+            id: messageId,
+            text: "🖼 Photo",
+            isFromMe: false,
+            isImage: true,
+            attachmentFileName: fileName
+        )
+    }
+
+    private func persistMessage(
+        id: UUID = UUID(),
+        text: String,
+        isFromMe: Bool,
+        isImage: Bool = false,
+        attachmentFileName: String? = nil
+    ) {
         let snapshotPeerId = activePeerId ?? activePeripheral?.identifier
         let snapshotPeerName = activePeerName ?? "Nearby device"
-        let message = Message(text: text, isFromMe: isFromMe, timestamp: Date())
+        let message = Message(
+            id: id,
+            text: text,
+            isFromMe: isFromMe,
+            timestamp: Date(),
+            isImage: isImage,
+            attachmentFileName: attachmentFileName
+        )
 
         DispatchQueue.main.async {
             guard let peerId = snapshotPeerId else { return }
             self.chatStore?.append(message, peerId: peerId, peerName: snapshotPeerName)
         }
+    }
+
+    private func transmitPayload(_ payload: Data) -> Bool {
+        var delivered = false
+        if let activePeripheral, let activeWritableCharacteristic {
+            let writeType: CBCharacteristicWriteType = activeWritableCharacteristic.properties.contains(.write) ? .withResponse : .withoutResponse
+            activePeripheral.writeValue(payload, for: activeWritableCharacteristic, type: writeType)
+            delivered = true
+        }
+
+        if let transferCharacteristic {
+            let didNotify = peripheralManager.updateValue(payload, for: transferCharacteristic, onSubscribedCentrals: nil)
+            delivered = delivered || didNotify
+        }
+        return delivered
+    }
+
+    private func transmitControlMessages(_ messages: [String]) -> Bool {
+        guard !messages.isEmpty else { return false }
+        var hadDelivery = false
+        for message in messages {
+            let sent = transmitControlMessage(message)
+            hadDelivery = hadDelivery || sent
+            if !sent {
+                return false
+            }
+        }
+        return hadDelivery
+    }
+
+    private func transmitControlMessage(_ message: String) -> Bool {
+        guard let payload = message.data(using: .utf8) else { return false }
+        return transmitPayload(payload)
     }
 
     private func handleIncomingPayload(_ data: Data) {
@@ -165,18 +284,37 @@ class BluetoothManager: NSObject, ObservableObject {
     }
 
     private func handleControlMessage(_ message: String) {
+        if message.hasPrefix("\(imageBeginTag)|") {
+            handleIncomingImageBeginControl(message)
+            return
+        }
+        if message.hasPrefix("\(imageChunkTag)|") {
+            handleIncomingImageChunkControl(message)
+            return
+        }
+        if message.hasPrefix("\(imageEndTag)|") {
+            handleIncomingImageEndControl(message)
+            return
+        }
+
         let parts = message.split(separator: "|", maxSplits: 1)
         guard let tag = parts.first else { return }
         let peerName = parts.count > 1 ? String(parts[1]) : "Nearby device"
 
         DispatchQueue.main.async {
             if tag == Substring(self.connectRequestTag) {
+                self.didReceiveConnectRequestForSession = true
+                // Remote side initiated first, prevent local request loop.
+                self.didSendConnectRequestForSession = false
+                guard !self.isChatSessionEstablished else { return }
+                if self.incomingRequest != nil { return }
                 let request = IncomingConnectionRequest(
                     peerName: peerName,
                     peerId: self.activePeripheral?.identifier
                 )
                 self.incomingRequest = request
             } else if tag == Substring(self.connectAcceptTag) {
+                self.isChatSessionEstablished = true
                 if let peerId = self.activePeerId ?? self.activePeripheral?.identifier {
                     let device = DiscoveredDevice(
                         peripheralId: peerId,
@@ -192,20 +330,94 @@ class BluetoothManager: NSObject, ObservableObject {
         }
     }
 
+    private func handleIncomingImageBeginControl(_ message: String) {
+        let parts = message.split(separator: "|", maxSplits: 3, omittingEmptySubsequences: false)
+        guard parts.count == 4 else { return }
+        guard let messageId = UUID(uuidString: String(parts[1])) else { return }
+        let fileExtension = String(parts[2])
+        let expectedChunkCount = Int(parts[3]) ?? 0
+        guard expectedChunkCount > 0 else { return }
+
+        incomingImageBuffers[messageId] = IncomingImageBuffer(
+            fileExtension: fileExtension,
+            expectedChunkCount: expectedChunkCount,
+            chunks: [:]
+        )
+    }
+
+    private func handleIncomingImageChunkControl(_ message: String) {
+        let parts = message.split(separator: "|", maxSplits: 3, omittingEmptySubsequences: false)
+        guard parts.count == 4 else { return }
+        guard let messageId = UUID(uuidString: String(parts[1])) else { return }
+        guard let chunkIndex = Int(parts[2]) else { return }
+
+        guard var buffer = incomingImageBuffers[messageId] else { return }
+        buffer.chunks[chunkIndex] = String(parts[3])
+        incomingImageBuffers[messageId] = buffer
+    }
+
+    private func handleIncomingImageEndControl(_ message: String) {
+        let parts = message.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false)
+        guard parts.count == 2 else { return }
+        guard let messageId = UUID(uuidString: String(parts[1])) else { return }
+        guard let buffer = incomingImageBuffers[messageId] else { return }
+
+        let orderedChunks = (0..<buffer.expectedChunkCount).compactMap { buffer.chunks[$0] }
+        guard orderedChunks.count == buffer.expectedChunkCount else {
+            incomingImageBuffers.removeValue(forKey: messageId)
+            DispatchQueue.main.async {
+                self.lastErrorMessage = "Image transfer incomplete."
+            }
+            return
+        }
+
+        let base64Payload = orderedChunks.joined()
+        guard let imageData = Data(base64Encoded: base64Payload), !imageData.isEmpty else {
+            incomingImageBuffers.removeValue(forKey: messageId)
+            return
+        }
+
+        let fileName = "img-\(messageId.uuidString).\(buffer.fileExtension)"
+        do {
+            _ = try ChatAttachmentStore.shared.save(data: imageData, suggestedFileName: fileName)
+            appendIncomingImageMessage(fileName: fileName, messageId: messageId)
+        } catch {
+            DispatchQueue.main.async {
+                self.lastErrorMessage = "Failed to save received image."
+            }
+        }
+        incomingImageBuffers.removeValue(forKey: messageId)
+    }
+
     func sendConnectRequest() {
+        guard isConnected else { return }
+        guard !didSendConnectRequestForSession else { return }
+        // If the remote peer initiated pairing first, don't ask back.
+        guard !didReceiveConnectRequestForSession else { return }
+        guard !isChatSessionEstablished else { return }
+
         let deviceName = UIDevice.current.name
         let payload = Data("\(controlPrefix)\(connectRequestTag)|\(deviceName)".utf8)
 
         if let activePeripheral, let activeWritableCharacteristic {
             let writeType: CBCharacteristicWriteType = activeWritableCharacteristic.properties.contains(.write) ? .withResponse : .withoutResponse
             activePeripheral.writeValue(payload, for: activeWritableCharacteristic, type: writeType)
+            didSendConnectRequestForSession = true
         }
         if let transferCharacteristic {
-            peripheralManager.updateValue(payload, for: transferCharacteristic, onSubscribedCentrals: nil)
+            let didNotify = peripheralManager.updateValue(payload, for: transferCharacteristic, onSubscribedCentrals: nil)
+            if didNotify {
+                didSendConnectRequestForSession = true
+            }
         }
     }
 
     func acceptIncomingConnection() {
+        guard !isChatSessionEstablished else {
+            incomingRequest = nil
+            return
+        }
+
         let deviceName = UIDevice.current.name
         let payload = Data("\(controlPrefix)\(connectAcceptTag)|\(deviceName)".utf8)
 
@@ -217,6 +429,7 @@ class BluetoothManager: NSObject, ObservableObject {
             peripheralManager.updateValue(payload, for: transferCharacteristic, onSubscribedCentrals: nil)
         }
 
+        isChatSessionEstablished = true
         if let request = incomingRequest, let peerId = request.peerId ?? activePeerId ?? activePeripheral?.identifier {
             let device = DiscoveredDevice(
                 peripheralId: peerId,
@@ -276,11 +489,39 @@ class BluetoothManager: NSObject, ObservableObject {
             self.activePeerId = nil
             self.activeWritableCharacteristic = nil
             self.activePeripheral = nil
+            self.resetHandshakeState()
             self.discoveredDevices = self.discoveredDevices.map { device in
                 var updated = device
                 updated.isConnected = false
                 return updated
             }
+        }
+    }
+
+    private func prepareImagePayload(from rawData: Data) -> Data? {
+        guard let image = UIImage(data: rawData) else {
+            return rawData.count <= maxImagePayloadBytes ? rawData : nil
+        }
+
+        let resized = resizedImage(image, maxDimension: 640)
+        for quality in stride(from: 0.7, through: 0.3, by: -0.1) {
+            if let data = resized.jpegData(compressionQuality: quality), data.count <= maxImagePayloadBytes {
+                return data
+            }
+        }
+        return nil
+    }
+
+    private func resizedImage(_ image: UIImage, maxDimension: CGFloat) -> UIImage {
+        let size = image.size
+        let longestSide = max(size.width, size.height)
+        guard longestSide > maxDimension else { return image }
+
+        let scale = maxDimension / longestSide
+        let targetSize = CGSize(width: size.width * scale, height: size.height * scale)
+        let renderer = UIGraphicsImageRenderer(size: targetSize)
+        return renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: targetSize))
         }
     }
 }
@@ -338,6 +579,7 @@ extension BluetoothManager: CBCentralManagerDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        resetHandshakeState()
         markConnected(peripheral)
         peripheral.delegate = self
         peripheral.discoverServices([serviceUUID])
@@ -347,6 +589,8 @@ extension BluetoothManager: CBCentralManagerDelegate {
         DispatchQueue.main.async {
             self.lastErrorMessage = error?.localizedDescription ?? "Failed to connect."
         }
+        pendingDeviceToConnect = nil
+        resetHandshakeState()
         markDisconnectedState()
     }
 
@@ -356,7 +600,18 @@ extension BluetoothManager: CBCentralManagerDelegate {
                 self.lastErrorMessage = error.localizedDescription
             }
         }
-        markDisconnectedState()
+        let isActiveDisconnect = peripheral.identifier == activePeripheral?.identifier
+
+        if let pendingDeviceToConnect {
+            markDisconnectedState()
+            self.pendingDeviceToConnect = nil
+            connect(to: pendingDeviceToConnect)
+            return
+        }
+
+        if isActiveDisconnect {
+            markDisconnectedState()
+        }
     }
 
     private func estimateDistance(rssi: Int) -> String {
@@ -374,6 +629,35 @@ extension BluetoothManager: CBCentralManagerDelegate {
         default:
             return "> 20 m"
         }
+    }
+}
+
+private extension BluetoothManager {
+    struct IncomingImageBuffer {
+        let fileExtension: String
+        let expectedChunkCount: Int
+        var chunks: [Int: String]
+    }
+
+    func resetHandshakeState() {
+        didSendConnectRequestForSession = false
+        didReceiveConnectRequestForSession = false
+        isChatSessionEstablished = false
+        incomingRequest = nil
+    }
+}
+
+private extension String {
+    func chunked(by chunkSize: Int) -> [String] {
+        guard chunkSize > 0, !isEmpty else { return [] }
+        var chunks: [String] = []
+        var start = startIndex
+        while start < endIndex {
+            let end = index(start, offsetBy: chunkSize, limitedBy: endIndex) ?? endIndex
+            chunks.append(String(self[start..<end]))
+            start = end
+        }
+        return chunks
     }
 }
 

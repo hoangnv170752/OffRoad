@@ -23,7 +23,10 @@ struct RecentChatsSection: View {
 
             VStack(spacing: 0) {
                 ForEach(Array(chats.enumerated()), id: \.element.id) { index, chat in
-                    ChatRowView(chat: chat)
+                    NavigationLink(value: chat.id) {
+                        ChatRowView(chat: chat)
+                    }
+                    .buttonStyle(.plain)
                     if index < chats.count - 1 {
                         Divider()
                             .padding(.leading, 76)

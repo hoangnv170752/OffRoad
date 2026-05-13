@@ -14,6 +14,7 @@ struct ChatDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.hideTabBar) private var hideTabBar
     @State private var messageText = ""
+    @State private var isDeleteConfirmationPresented = false
 
     private var stored: StoredConversation? {
         chatStore.conversation(for: peerId)
@@ -49,6 +50,24 @@ struct ChatDetailView: View {
         }
         .onDisappear {
             withAnimation { hideTabBar.wrappedValue = false }
+        }
+        .alert("Bluetooth Error", isPresented: Binding(
+            get: { bluetoothManager.lastErrorMessage != nil },
+            set: { newValue in
+                if !newValue { bluetoothManager.lastErrorMessage = nil }
+            }
+        )) {
+            Button("OK", role: .cancel) { bluetoothManager.lastErrorMessage = nil }
+        } message: {
+            Text(bluetoothManager.lastErrorMessage ?? "")
+        }
+        .confirmationDialog("Delete all messages in this chat?", isPresented: $isDeleteConfirmationPresented) {
+            Button("Delete Chat", role: .destructive) {
+                deleteCurrentConversation()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This action cannot be undone.")
         }
     }
 
@@ -90,22 +109,34 @@ struct ChatDetailView: View {
 
             Spacer()
 
-            if isLive {
-                Button(action: { bluetoothManager.disconnect() }) {
-                    Image(systemName: "antenna.radiowaves.left.and.right.slash")
+            HStack(spacing: 6) {
+                if isLive {
+                    Button(action: { bluetoothManager.disconnect() }) {
+                        Image(systemName: "antenna.radiowaves.left.and.right.slash")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(.primary)
+                            .frame(width: 32, height: 32)
+                    }
+                    .accessibilityLabel("Disconnect")
+                } else if isInRange {
+                    Button(action: reconnect) {
+                        Image(systemName: "antenna.radiowaves.left.and.right")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(Color(red: 0.15, green: 0.35, blue: 0.25))
+                            .frame(width: 32, height: 32)
+                    }
+                    .accessibilityLabel("Reconnect")
+                }
+
+                Button(role: .destructive) {
+                    isDeleteConfirmationPresented = true
+                } label: {
+                    Image(systemName: "trash")
                         .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(.red)
                         .frame(width: 32, height: 32)
                 }
-                .accessibilityLabel("Disconnect")
-            } else if isInRange {
-                Button(action: reconnect) {
-                    Image(systemName: "antenna.radiowaves.left.and.right")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(Color(red: 0.15, green: 0.35, blue: 0.25))
-                        .frame(width: 32, height: 32)
-                }
-                .accessibilityLabel("Reconnect")
+                .accessibilityLabel("Delete chat")
             }
         }
         .padding(.horizontal, 16)
@@ -182,7 +213,7 @@ struct ChatDetailView: View {
     // MARK: - Input
 
     private var inputBar: some View {
-        ChatInputBar(text: $messageText, onSend: sendMessage)
+        ChatInputBar(text: $messageText, onSend: sendMessage, onSendImage: sendImage)
             .opacity(isLive ? 1.0 : 0.55)
             .disabled(!isLive)
     }
@@ -201,9 +232,26 @@ struct ChatDetailView: View {
         messageText = ""
     }
 
+    private func sendImage(_ data: Data) {
+        guard isLive else { return }
+        bluetoothManager.sendImage(data)
+    }
+
     private func reconnect() {
         guard let device = bluetoothManager.discoveredDevices.first(where: { $0.peripheralId == peerId }) else { return }
         bluetoothManager.connect(to: device)
+    }
+
+    private func deleteCurrentConversation() {
+        if let stored {
+            for message in stored.messages {
+                if let fileName = message.attachmentFileName {
+                    ChatAttachmentStore.shared.delete(fileName: fileName)
+                }
+            }
+        }
+        chatStore.deleteConversation(peerId: peerId)
+        dismiss()
     }
 }
 

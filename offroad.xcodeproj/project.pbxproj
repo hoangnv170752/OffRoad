@@ -404,6 +404,8 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "OffRoad uses Bluetooth to discover nearby devices and send messages without internet.";
 				INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription = "OffRoad uses Bluetooth to connect with nearby devices for offline messaging.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "OffRoad saves sent and received images locally in your encrypted chat history.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "OffRoad needs access to your photos so you can choose images to send to nearby devices.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UIBackgroundModes = "bluetooth-central bluetooth-peripheral";
@@ -439,6 +441,8 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "OffRoad uses Bluetooth to discover nearby devices and send messages without internet.";
 				INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription = "OffRoad uses Bluetooth to connect with nearby devices for offline messaging.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "OffRoad saves sent and received images locally in your encrypted chat history.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "OffRoad needs access to your photos so you can choose images to send to nearby devices.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UIBackgroundModes = "bluetooth-central bluetooth-peripheral";

@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import Photos
 
 enum AppTab: String {
     case home, chats, contacts, settings
@@ -107,6 +108,15 @@ struct ContentView: View {
                 bluetoothManager.shouldNavigateToChat = nil
             }
         }
+        .onAppear {
+            requestPhotoPermissionIfNeeded()
+        }
+    }
+
+    private func requestPhotoPermissionIfNeeded() {
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        guard status == .notDetermined else { return }
+        PHPhotoLibrary.requestAuthorization(for: .readWrite) { _ in }
     }
 }
 

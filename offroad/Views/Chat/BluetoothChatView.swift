@@ -7,6 +7,7 @@ struct BluetoothChatView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.hideTabBar) private var hideTabBar
     @State private var messageText = ""
+    @State private var isDeleteConfirmationPresented = false
 
     private var messages: [Message] {
         chatStore.messages(for: device.peripheralId)
@@ -17,7 +18,7 @@ struct BluetoothChatView: View {
             statusBanner
             encryptionNotice
             messageList
-            ChatInputBar(text: $messageText, onSend: sendMessage)
+            ChatInputBar(text: $messageText, onSend: sendMessage, onSendImage: sendImage)
         }
         .navigationTitle(bluetoothManager.activePeerName ?? device.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -25,7 +26,13 @@ struct BluetoothChatView: View {
             ToolbarItem(placement: .topBarLeading) {
                 Button("Close") { dismiss() }
             }
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button(role: .destructive) {
+                    isDeleteConfirmationPresented = true
+                } label: {
+                    Image(systemName: "trash")
+                }
+
                 if bluetoothManager.isConnected {
                     Button("Disconnect") {
                         bluetoothManager.disconnect()
@@ -52,6 +59,14 @@ struct BluetoothChatView: View {
             Button("OK", role: .cancel) { bluetoothManager.lastErrorMessage = nil }
         } message: {
             Text(bluetoothManager.lastErrorMessage ?? "")
+        }
+        .confirmationDialog("Delete all messages in this chat?", isPresented: $isDeleteConfirmationPresented) {
+            Button("Delete Chat", role: .destructive) {
+                deleteCurrentConversation()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This action cannot be undone.")
         }
     }
 
@@ -126,6 +141,21 @@ struct BluetoothChatView: View {
     private func sendMessage() {
         bluetoothManager.sendMessage(messageText)
         messageText = ""
+    }
+
+    private func sendImage(_ data: Data) {
+        bluetoothManager.sendImage(data)
+    }
+
+    private func deleteCurrentConversation() {
+        let existingMessages = chatStore.messages(for: device.peripheralId)
+        for message in existingMessages {
+            if let fileName = message.attachmentFileName {
+                ChatAttachmentStore.shared.delete(fileName: fileName)
+            }
+        }
+        chatStore.deleteConversation(peerId: device.peripheralId)
+        dismiss()
     }
 }
 
