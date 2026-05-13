@@ -14,7 +14,7 @@ struct SettingsView: View {
         NavigationStack {
             List {
                 themeSection
-                languageSection
+                // languageSection
                 aboutSection
             }
             .navigationTitle(appSettings.localized("Settings"))

@@ -13,23 +13,39 @@ import SwiftUI
 class BluetoothManager: NSObject, ObservableObject {
     @Published var discoveredDevices: [DiscoveredDevice] = []
     @Published var isScanning = false
+    @Published var isAdvertising = false
     @Published var bluetoothState: CBManagerState = .unknown
     @Published var permissionDenied = false
+    @Published var isConnected = false
+    @Published var activePeerName: String?
+    @Published var liveMessages: [Message] = []
+    @Published var lastErrorMessage: String?
 
     private var centralManager: CBCentralManager!
+    private var peripheralManager: CBPeripheralManager!
     private var scanTimer: Timer?
+    private var discoveredPeripherals: [UUID: CBPeripheral] = [:]
+    private var activePeripheral: CBPeripheral?
+    private var activeWritableCharacteristic: CBCharacteristic?
+    private var transferCharacteristic: CBMutableCharacteristic?
+
+    private let serviceUUID = CBUUID(string: "A0E6F0B3-7D58-4F43-85B2-D441E61A4F11")
+    private let characteristicUUID = CBUUID(string: "CA6D76C5-CE1A-4B1A-90A3-80EA499D500E")
 
     override init() {
         super.init()
         centralManager = CBCentralManager(delegate: self, queue: nil)
+        peripheralManager = CBPeripheralManager(delegate: self, queue: nil)
     }
 
     func startScanning() {
         guard centralManager.state == .poweredOn else { return }
         discoveredDevices.removeAll()
+        discoveredPeripherals.removeAll()
         isScanning = true
+        lastErrorMessage = nil
         centralManager.scanForPeripherals(
-            withServices: nil,
+            withServices: [serviceUUID],
             options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
         )
 
@@ -52,6 +68,123 @@ class BluetoothManager: NSObject, ObservableObject {
             self?.startScanning()
         }
     }
+
+    func connect(to device: DiscoveredDevice) {
+        guard let peripheral = discoveredPeripherals[device.peripheralId] else {
+            lastErrorMessage = "Device is no longer available."
+            return
+        }
+
+        if activePeripheral?.identifier != peripheral.identifier, let activePeripheral {
+            centralManager.cancelPeripheralConnection(activePeripheral)
+        }
+
+        activePeerName = device.name
+        activePeripheral = peripheral
+        activeWritableCharacteristic = nil
+        peripheral.delegate = self
+        centralManager.connect(peripheral, options: nil)
+    }
+
+    func disconnect() {
+        if let activePeripheral {
+            centralManager.cancelPeripheralConnection(activePeripheral)
+        }
+        markDisconnectedState()
+    }
+
+    func sendMessage(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        let payload = Data(trimmed.utf8)
+        appendOutgoingMessage(trimmed)
+
+        var delivered = false
+        if let activePeripheral, let activeWritableCharacteristic {
+            let writeType: CBCharacteristicWriteType = activeWritableCharacteristic.properties.contains(.write) ? .withResponse : .withoutResponse
+            activePeripheral.writeValue(payload, for: activeWritableCharacteristic, type: writeType)
+            delivered = true
+        }
+
+        if let transferCharacteristic {
+            let didNotify = peripheralManager.updateValue(payload, for: transferCharacteristic, onSubscribedCentrals: nil)
+            delivered = delivered || didNotify
+        }
+
+        if !delivered {
+            lastErrorMessage = "No active Bluetooth connection."
+        }
+    }
+
+    func clearLiveMessages() {
+        liveMessages.removeAll()
+    }
+
+    private func appendOutgoingMessage(_ text: String) {
+        DispatchQueue.main.async {
+            self.liveMessages.append(Message(text: text, isFromMe: true, timestamp: Date()))
+        }
+    }
+
+    private func appendIncomingMessage(_ text: String) {
+        DispatchQueue.main.async {
+            self.liveMessages.append(Message(text: text, isFromMe: false, timestamp: Date()))
+        }
+    }
+
+    private func handleIncomingPayload(_ data: Data) {
+        guard let text = String(data: data, encoding: .utf8), !text.isEmpty else { return }
+        appendIncomingMessage(text)
+    }
+
+    private func configurePeripheralService() {
+        let characteristic = CBMutableCharacteristic(
+            type: characteristicUUID,
+            properties: [.notify, .write, .writeWithoutResponse],
+            value: nil,
+            permissions: [.writeable]
+        )
+
+        let service = CBMutableService(type: serviceUUID, primary: true)
+        service.characteristics = [characteristic]
+        transferCharacteristic = characteristic
+        peripheralManager.add(service)
+    }
+
+    private func startAdvertisingIfPossible() {
+        guard peripheralManager.state == .poweredOn, !peripheralManager.isAdvertising else { return }
+        let displayName = (Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String) ?? "OFFROAD"
+        let nameSuffix = UUID().uuidString.prefix(4)
+        peripheralManager.startAdvertising([
+            CBAdvertisementDataServiceUUIDsKey: [serviceUUID],
+            CBAdvertisementDataLocalNameKey: "\(displayName)-\(nameSuffix)"
+        ])
+    }
+
+    private func markConnected(_ peripheral: CBPeripheral) {
+        DispatchQueue.main.async {
+            self.isConnected = true
+            self.activePeerName = peripheral.name ?? self.activePeerName
+            if let index = self.discoveredDevices.firstIndex(where: { $0.peripheralId == peripheral.identifier }) {
+                self.discoveredDevices[index].isConnected = true
+            }
+        }
+    }
+
+    private func markDisconnectedState() {
+        DispatchQueue.main.async {
+            self.isConnected = false
+            self.activePeerName = nil
+            self.activeWritableCharacteristic = nil
+            self.activePeripheral = nil
+            self.discoveredDevices = self.discoveredDevices.map { device in
+                var updated = device
+                updated.isConnected = false
+                return updated
+            }
+        }
+    }
 }
 
 // MARK: - CBCentralManagerDelegate
@@ -66,6 +199,7 @@ extension BluetoothManager: CBCentralManagerDelegate {
                 self.startScanning()
             case .unauthorized:
                 self.permissionDenied = true
+                self.lastErrorMessage = "Bluetooth permission denied."
             default:
                 self.isScanning = false
             }
@@ -80,6 +214,7 @@ extension BluetoothManager: CBCentralManagerDelegate {
     ) {
         let name = peripheral.name ?? advertisementData[CBAdvertisementDataLocalNameKey] as? String
         guard let deviceName = name, !deviceName.isEmpty else { return }
+        discoveredPeripherals[peripheral.identifier] = peripheral
 
         let rssiValue = RSSI.intValue
         let distance = estimateDistance(rssi: rssiValue)
@@ -95,11 +230,34 @@ extension BluetoothManager: CBCentralManagerDelegate {
                     name: deviceName,
                     rssi: rssiValue,
                     distance: distance,
-                    lastSeen: Date()
+                    lastSeen: Date(),
+                    isConnected: false
                 )
                 self.discoveredDevices.append(device)
             }
         }
+    }
+
+    func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        markConnected(peripheral)
+        peripheral.delegate = self
+        peripheral.discoverServices([serviceUUID])
+    }
+
+    func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
+        DispatchQueue.main.async {
+            self.lastErrorMessage = error?.localizedDescription ?? "Failed to connect."
+        }
+        markDisconnectedState()
+    }
+
+    func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+        if let error {
+            DispatchQueue.main.async {
+                self.lastErrorMessage = error.localizedDescription
+            }
+        }
+        markDisconnectedState()
     }
 
     private func estimateDistance(rssi: Int) -> String {
@@ -120,15 +278,104 @@ extension BluetoothManager: CBCentralManagerDelegate {
     }
 }
 
+// MARK: - CBPeripheralDelegate
+
+extension BluetoothManager: CBPeripheralDelegate {
+    func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+        if let error {
+            DispatchQueue.main.async {
+                self.lastErrorMessage = error.localizedDescription
+            }
+            return
+        }
+
+        peripheral.services?.forEach { service in
+            guard service.uuid == serviceUUID else { return }
+            peripheral.discoverCharacteristics([characteristicUUID], for: service)
+        }
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
+        if let error {
+            DispatchQueue.main.async {
+                self.lastErrorMessage = error.localizedDescription
+            }
+            return
+        }
+
+        service.characteristics?.forEach { characteristic in
+            guard characteristic.uuid == characteristicUUID else { return }
+            activeWritableCharacteristic = characteristic
+            peripheral.setNotifyValue(true, for: characteristic)
+        }
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
+        if let error {
+            DispatchQueue.main.async {
+                self.lastErrorMessage = error.localizedDescription
+            }
+            return
+        }
+
+        guard characteristic.uuid == characteristicUUID, let data = characteristic.value else { return }
+        handleIncomingPayload(data)
+    }
+}
+
+// MARK: - CBPeripheralManagerDelegate
+
+extension BluetoothManager: CBPeripheralManagerDelegate {
+    func peripheralManagerDidUpdateState(_ peripheral: CBPeripheralManager) {
+        DispatchQueue.main.async {
+            self.isAdvertising = peripheral.isAdvertising
+            if peripheral.state == .poweredOn {
+                self.configurePeripheralService()
+            } else {
+                self.isAdvertising = false
+            }
+        }
+    }
+
+    func peripheralManager(_ peripheral: CBPeripheralManager, didAdd service: CBService, error: Error?) {
+        if let error {
+            DispatchQueue.main.async {
+                self.lastErrorMessage = error.localizedDescription
+            }
+            return
+        }
+        startAdvertisingIfPossible()
+    }
+
+    func peripheralManagerDidStartAdvertising(_ peripheral: CBPeripheralManager, error: Error?) {
+        DispatchQueue.main.async {
+            self.isAdvertising = error == nil
+            if let error {
+                self.lastErrorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    func peripheralManager(_ peripheral: CBPeripheralManager, didReceiveWrite requests: [CBATTRequest]) {
+        for request in requests where request.characteristic.uuid == characteristicUUID {
+            if let value = request.value {
+                handleIncomingPayload(value)
+            }
+            peripheral.respond(to: request, withResult: .success)
+        }
+    }
+}
+
 // MARK: - DiscoveredDevice Model
 
 struct DiscoveredDevice: Identifiable {
-    let id = UUID()
+    var id: UUID { peripheralId }
     let peripheralId: UUID
     var name: String
     var rssi: Int
     var distance: String
     var lastSeen: Date
+    var isConnected: Bool
 
     var signalStrength: SignalStrength {
         switch rssi {
@@ -151,12 +398,12 @@ struct DiscoveredDevice: Identifiable {
             }
         }
 
-        var color: (any ShapeStyle) {
+        var color: Color {
             switch self {
-            case .excellent: return Color.green
-            case .good: return Color.green.opacity(0.7)
-            case .fair: return Color.orange
-            case .weak: return Color.red.opacity(0.7)
+            case .excellent: return .green
+            case .good: return .green.opacity(0.7)
+            case .fair: return .orange
+            case .weak: return .red.opacity(0.7)
             }
         }
 

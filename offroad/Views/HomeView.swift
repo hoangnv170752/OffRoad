@@ -10,6 +10,7 @@ import SwiftUI
 struct HomeView: View {
     @Binding var selectedTab: AppTab
     @EnvironmentObject var bluetoothManager: BluetoothManager
+    @State private var selectedDevice: DiscoveredDevice?
 
     var body: some View {
         ScrollView {
@@ -22,14 +23,26 @@ struct HomeView: View {
                 RecentChatsSection(chats: [])
                     .padding(.top, 24)
 
-                NearbyDevicesSection(devices: bluetoothManager.discoveredDevices.map {
-                    NearbyDevice(name: $0.name, distance: $0.distance, avatarColor: .blue)
-                })
+                NearbyDevicesSection(
+                    devices: bluetoothManager.discoveredDevices,
+                    onSelectDevice: { device in
+                        selectedDevice = device
+                    },
+                    onScanTap: {
+                        bluetoothManager.refreshScan()
+                    }
+                )
                     .padding(.top, 24)
             }
             .padding(.horizontal, 20)
         }
         .background(Color(.systemGroupedBackground))
+        .sheet(item: $selectedDevice) { device in
+            NavigationStack {
+                BluetoothChatView(device: device)
+                    .environmentObject(bluetoothManager)
+            }
+        }
     }
 }
 
