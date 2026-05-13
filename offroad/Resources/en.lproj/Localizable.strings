@@ -40,6 +40,13 @@
 "Bluetooth is Off" = "Bluetooth is Off";
 "Open Settings" = "Open Settings";
 
+/* FAQ */
+"Search FAQ" = "Search FAQ";
+"Search questions" = "Search questions";
+"No matching questions" = "No matching questions";
+"Try a different keyword." = "Try a different keyword.";
+"Done" = "Done";
+
 /* Settings */
 "Settings" = "Settings";
 "Appearance" = "Appearance";

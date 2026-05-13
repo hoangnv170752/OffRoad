@@ -40,6 +40,13 @@
 "Bluetooth is Off" = "Bluetooth desactivado";
 "Open Settings" = "Abrir ajustes";
 
+/* FAQ */
+"Search FAQ" = "Buscar en FAQ";
+"Search questions" = "Buscar preguntas";
+"No matching questions" = "No hay preguntas coincidentes";
+"Try a different keyword." = "Prueba con otra palabra clave.";
+"Done" = "Listo";
+
 /* Settings */
 "Settings" = "Ajustes";
 "Appearance" = "Apariencia";

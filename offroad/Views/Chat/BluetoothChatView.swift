@@ -10,12 +10,18 @@ import SwiftUI
 struct BluetoothChatView: View {
     let device: DiscoveredDevice
     @EnvironmentObject private var bluetoothManager: BluetoothManager
+    @EnvironmentObject private var chatStore: ChatStore
     @Environment(\.dismiss) private var dismiss
     @State private var messageText = ""
+
+    private var messages: [Message] {
+        chatStore.messages(for: device.peripheralId)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             statusBanner
+            encryptionNotice
             messageList
             ChatInputBar(text: $messageText, onSend: sendMessage)
         }
@@ -23,9 +29,7 @@ struct BluetoothChatView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                Button("Close") {
-                    dismiss()
-                }
+                Button("Close") { dismiss() }
             }
             ToolbarItem(placement: .topBarTrailing) {
                 if bluetoothManager.isConnected {
@@ -36,15 +40,12 @@ struct BluetoothChatView: View {
             }
         }
         .onAppear {
-            bluetoothManager.clearLiveMessages()
             bluetoothManager.connect(to: device)
         }
         .alert("Bluetooth Error", isPresented: Binding(
             get: { bluetoothManager.lastErrorMessage != nil },
             set: { newValue in
-                if !newValue {
-                    bluetoothManager.lastErrorMessage = nil
-                }
+                if !newValue { bluetoothManager.lastErrorMessage = nil }
             }
         )) {
             Button("OK", role: .cancel) { bluetoothManager.lastErrorMessage = nil }
@@ -52,6 +53,8 @@ struct BluetoothChatView: View {
             Text(bluetoothManager.lastErrorMessage ?? "")
         }
     }
+
+    // MARK: - Header & Status
 
     private var statusBanner: some View {
         HStack(spacing: 8) {
@@ -70,17 +73,31 @@ struct BluetoothChatView: View {
         .background(Color(.secondarySystemBackground))
     }
 
+    private var encryptionNotice: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "lock.shield.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+            Text("Stored & encrypted on this device only")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 6)
+    }
+
+    // MARK: - Messages
+
     private var messageList: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 6) {
-                    if bluetoothManager.liveMessages.isEmpty {
+                    if messages.isEmpty {
                         Text("No messages yet. Say hello 👋")
                             .font(.system(size: 14))
                             .foregroundStyle(.secondary)
                             .padding(.top, 20)
                     }
-                    ForEach(bluetoothManager.liveMessages) { message in
+                    ForEach(messages) { message in
                         MessageBubbleView(message: message)
                             .id(message.id)
                     }
@@ -88,15 +105,22 @@ struct BluetoothChatView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
             }
-            .onChange(of: bluetoothManager.liveMessages.count) {
-                if let last = bluetoothManager.liveMessages.last {
+            .onChange(of: messages.count) {
+                if let last = messages.last {
                     withAnimation(.easeOut(duration: 0.2)) {
                         proxy.scrollTo(last.id, anchor: .bottom)
                     }
                 }
             }
+            .onAppear {
+                if let last = messages.last {
+                    proxy.scrollTo(last.id, anchor: .bottom)
+                }
+            }
         }
     }
+
+    // MARK: - Actions
 
     private func sendMessage() {
         bluetoothManager.sendMessage(messageText)
@@ -117,5 +141,6 @@ struct BluetoothChatView: View {
             )
         )
         .environmentObject(BluetoothManager())
+        .environmentObject(ChatStore())
     }
 }

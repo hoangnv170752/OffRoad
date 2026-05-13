@@ -13,44 +13,58 @@ enum AppTab: String {
 
 struct ContentView: View {
     @State private var selectedTab: AppTab = .home
-    @StateObject private var bluetoothManager = BluetoothManager()
-    @Environment(AppSettings.self) var appSettings
+    @State private var isFAQSearchPresented = false
+    @StateObject private var chatStore: ChatStore
+    @StateObject private var bluetoothManager: BluetoothManager
+    @Environment(AppSettings.self) private var appSettings
+
+    init() {
+        let store = ChatStore()
+        let manager = BluetoothManager()
+        manager.chatStore = store
+        _chatStore = StateObject(wrappedValue: store)
+        _bluetoothManager = StateObject(wrappedValue: manager)
+    }
 
     var body: some View {
         TabView(selection: $selectedTab) {
             HomeView(selectedTab: $selectedTab)
-                .tabItem {
-                    Image(systemName: "house.fill")
-                    Text(appSettings.localized("Home"))
-                }
                 .tag(AppTab.home)
+                .toolbar(.hidden, for: .tabBar)
 
             ChatsView()
-                .tabItem {
-                    Image(systemName: "bubble.left.and.bubble.right.fill")
-                    Text(appSettings.localized("Chats"))
-                }
                 .tag(AppTab.chats)
+                .toolbar(.hidden, for: .tabBar)
 
             ContactsView()
-                .tabItem {
-                    Image(systemName: "person.2.fill")
-                    Text(appSettings.localized("Contacts"))
-                }
                 .tag(AppTab.contacts)
+                .toolbar(.hidden, for: .tabBar)
 
             SettingsView()
-                .tabItem {
-                    Image(systemName: "gearshape.fill")
-                    Text(appSettings.localized("Settings"))
-                }
                 .tag(AppTab.settings)
+                .toolbar(.hidden, for: .tabBar)
         }
         .tint(Color(red: 0.15, green: 0.35, blue: 0.25))
         .environmentObject(bluetoothManager)
+        .environmentObject(chatStore)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            BottomTabBar(
+                selectedTab: $selectedTab,
+                onSearchTap: { isFAQSearchPresented = true }
+            )
+            .background(
+                Color(.systemGroupedBackground)
+                    .opacity(0.001)
+                    .ignoresSafeArea(edges: .bottom)
+            )
+        }
+        .sheet(isPresented: $isFAQSearchPresented) {
+            FAQSearchView()
+        }
     }
 }
 
 #Preview {
     ContentView()
+        .environment(AppSettings())
 }

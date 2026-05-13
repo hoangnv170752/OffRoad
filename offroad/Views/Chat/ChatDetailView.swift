@@ -8,10 +8,31 @@
 import SwiftUI
 
 struct ChatDetailView: View {
-    let conversation: Conversation
-    @State private var messageText = ""
-    @State private var messages: [Message] = []
+    let peerId: UUID
+    @EnvironmentObject private var chatStore: ChatStore
+    @EnvironmentObject private var bluetoothManager: BluetoothManager
     @Environment(\.dismiss) private var dismiss
+    @State private var messageText = ""
+
+    private var stored: StoredConversation? {
+        chatStore.conversation(for: peerId)
+    }
+
+    private var messages: [Message] {
+        stored?.messages ?? []
+    }
+
+    private var peerName: String {
+        stored?.peerName ?? "Unknown"
+    }
+
+    private var isLive: Bool {
+        bluetoothManager.isConnected && bluetoothManager.activePeerId == peerId
+    }
+
+    private var isInRange: Bool {
+        bluetoothManager.discoveredDevices.contains(where: { $0.peripheralId == peerId })
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -19,12 +40,9 @@ struct ChatDetailView: View {
             encryptionNotice
             messagesList
             connectionStatus
-            ChatInputBar(text: $messageText, onSend: sendMessage)
+            inputBar
         }
         .navigationBarHidden(true)
-        .onAppear {
-            messages = conversation.messages
-        }
     }
 
     // MARK: - Header
@@ -34,19 +52,19 @@ struct ChatDetailView: View {
             Button(action: { dismiss() }) {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(Color(red: 0.15, green: 0.35, blue: 0.25))
+                    .foregroundStyle(Color(red: 0.15, green: 0.35, blue: 0.25))
             }
 
             ZStack(alignment: .bottomTrailing) {
                 Circle()
-                    .fill(conversation.avatarColor.opacity(0.25))
+                    .fill(avatarColor.opacity(0.25))
                     .frame(width: 36, height: 36)
                     .overlay(
-                        Text(String(conversation.name.prefix(1)))
+                        Text(String(peerName.prefix(1)))
                             .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(conversation.avatarColor)
+                            .foregroundStyle(avatarColor)
                     )
-                if conversation.isOnline {
+                if isInRange {
                     Circle()
                         .fill(.green)
                         .frame(width: 10, height: 10)
@@ -56,20 +74,31 @@ struct ChatDetailView: View {
             }
 
             VStack(alignment: .leading, spacing: 1) {
-                Text(conversation.name)
+                Text(peerName)
                     .font(.system(size: 16, weight: .semibold))
-                Text(conversation.isNearby ? "Online (Nearby)" : "Offline")
+                Text(isInRange ? "Online (Nearby)" : "Offline")
                     .font(.system(size: 12))
-                    .foregroundColor(conversation.isNearby ? .green : .secondary)
+                    .foregroundStyle(isInRange ? Color.green : .secondary)
             }
 
             Spacer()
 
-            Button(action: {}) {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundColor(.primary)
-                    .frame(width: 32, height: 32)
+            if isLive {
+                Button(action: { bluetoothManager.disconnect() }) {
+                    Image(systemName: "antenna.radiowaves.left.and.right.slash")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(.primary)
+                        .frame(width: 32, height: 32)
+                }
+                .accessibilityLabel("Disconnect")
+            } else if isInRange {
+                Button(action: reconnect) {
+                    Image(systemName: "antenna.radiowaves.left.and.right")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(Color(red: 0.15, green: 0.35, blue: 0.25))
+                        .frame(width: 32, height: 32)
+                }
+                .accessibilityLabel("Reconnect")
             }
         }
         .padding(.horizontal, 16)
@@ -84,22 +113,28 @@ struct ChatDetailView: View {
 
     private var encryptionNotice: some View {
         HStack(spacing: 6) {
-            Image(systemName: "lock.fill")
+            Image(systemName: "lock.shield.fill")
                 .font(.system(size: 10))
-                .foregroundColor(.secondary)
-            Text("Messages are end-to-end encrypted")
+                .foregroundStyle(.secondary)
+            Text("Stored & encrypted on this device only")
                 .font(.system(size: 11))
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
         }
         .padding(.vertical, 8)
     }
 
-    // MARK: - Messages List
+    // MARK: - Messages
 
     private var messagesList: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 6) {
+                    if messages.isEmpty {
+                        Text("No messages yet.")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 20)
+                    }
                     ForEach(messages) { message in
                         MessageBubbleView(message: message)
                             .id(message.id)
@@ -108,10 +143,15 @@ struct ChatDetailView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
             }
+            .onAppear {
+                if let last = messages.last {
+                    proxy.scrollTo(last.id, anchor: .bottom)
+                }
+            }
             .onChange(of: messages.count) {
-                if let lastMessage = messages.last {
+                if let last = messages.last {
                     withAnimation(.easeOut(duration: 0.2)) {
-                        proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                        proxy.scrollTo(last.id, anchor: .bottom)
                     }
                 }
             }
@@ -122,38 +162,48 @@ struct ChatDetailView: View {
 
     private var connectionStatus: some View {
         HStack(spacing: 6) {
-            Image(systemName: "antenna.radiowaves.left.and.right")
+            Image(systemName: isLive ? "antenna.radiowaves.left.and.right" : "antenna.radiowaves.left.and.right.slash")
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(conversation.isNearby ? .green : .orange)
-            Text(conversation.isNearby ? "Connected" : "Out of range")
+                .foregroundStyle(isLive ? .green : .orange)
+            Text(isLive ? "Connected" : (isInRange ? "Nearby — tap antenna to reconnect" : "Out of range"))
                 .font(.system(size: 11, weight: .medium))
-                .foregroundColor(conversation.isNearby ? Color(red: 0.15, green: 0.35, blue: 0.25) : .orange)
-
-            if conversation.isNearby {
-                Image(systemName: "cellularbars")
-                    .font(.system(size: 11))
-                    .foregroundColor(.green)
-                Text("Good signal")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-            }
+                .foregroundStyle(isLive ? Color(red: 0.15, green: 0.35, blue: 0.25) : .orange)
         }
         .padding(.vertical, 6)
     }
 
+    // MARK: - Input
+
+    private var inputBar: some View {
+        ChatInputBar(text: $messageText, onSend: sendMessage)
+            .opacity(isLive ? 1.0 : 0.55)
+            .disabled(!isLive)
+    }
+
     // MARK: - Actions
 
+    private var avatarColor: Color {
+        let palette: [Color] = [.green, .teal, .brown, .orange, .blue, .indigo, .pink, .purple]
+        let hash = abs(peerName.hashValue)
+        return palette[hash % max(palette.count, 1)]
+    }
+
     private func sendMessage() {
-        let newMessage = Message(text: messageText, isFromMe: true, timestamp: Date())
-        withAnimation(.easeInOut(duration: 0.15)) {
-            messages.append(newMessage)
-        }
+        guard isLive else { return }
+        bluetoothManager.sendMessage(messageText)
         messageText = ""
+    }
+
+    private func reconnect() {
+        guard let device = bluetoothManager.discoveredDevices.first(where: { $0.peripheralId == peerId }) else { return }
+        bluetoothManager.connect(to: device)
     }
 }
 
 #Preview {
     NavigationStack {
-        ChatDetailView(conversation: Conversation.mockData[0])
+        ChatDetailView(peerId: UUID())
+            .environmentObject(ChatStore())
+            .environmentObject(BluetoothManager())
     }
 }

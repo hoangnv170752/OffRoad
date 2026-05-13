@@ -8,81 +8,133 @@
 import SwiftUI
 
 struct ChatsView: View {
-    @Environment(AppSettings.self) var appSettings
-    let conversations: [Conversation] = Conversation.mockData
+    @Environment(AppSettings.self) private var appSettings
+    @EnvironmentObject private var chatStore: ChatStore
+    @EnvironmentObject private var bluetoothManager: BluetoothManager
+
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter
+    }()
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 0) {
-                    ForEach(Array(conversations.enumerated()), id: \.element.id) { index, conversation in
-                        NavigationLink(destination: ChatDetailView(conversation: conversation)) {
-                            ConversationRow(conversation: conversation)
-                        }
-                        .buttonStyle(.plain)
-
-                        if index < conversations.count - 1 {
-                            Divider()
-                                .padding(.leading, 76)
-                        }
-                    }
+            Group {
+                if chatStore.conversations.isEmpty {
+                    emptyState
+                } else {
+                    conversationsList
                 }
             }
             .navigationTitle(appSettings.localized("Chats"))
         }
     }
+
+    // MARK: - List
+
+    private var conversationsList: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                ForEach(Array(chatStore.conversations.enumerated()), id: \.element.id) { index, stored in
+                    NavigationLink(value: stored.id) {
+                        StoredConversationRow(
+                            stored: stored,
+                            isOnline: isPeerOnline(stored.id),
+                            timeString: Self.relativeFormatter.localizedString(for: stored.lastUpdated, relativeTo: Date())
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    if index < chatStore.conversations.count - 1 {
+                        Divider()
+                            .padding(.leading, 76)
+                    }
+                }
+            }
+        }
+        .navigationDestination(for: UUID.self) { peerId in
+            ChatDetailView(peerId: peerId)
+        }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 12) {
+            Spacer()
+            Image(systemName: "lock.shield")
+                .font(.system(size: 42))
+                .foregroundStyle(.secondary.opacity(0.6))
+            Text("No conversations yet")
+                .font(.system(size: 17, weight: .semibold))
+            Text("Find a friend in Home → Nearby Devices and tap to start a Bluetooth chat. Messages will be stored encrypted on this device.")
+                .font(.system(size: 14))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func isPeerOnline(_ peerId: UUID) -> Bool {
+        bluetoothManager.discoveredDevices.contains(where: { $0.peripheralId == peerId })
+    }
 }
 
-struct ConversationRow: View {
-    let conversation: Conversation
+// MARK: - Row
+
+struct StoredConversationRow: View {
+    let stored: StoredConversation
+    let isOnline: Bool
+    let timeString: String
+
+    private var avatarColor: Color {
+        let palette: [Color] = [.green, .teal, .brown, .orange, .blue, .indigo, .pink, .purple]
+        let hash = abs(stored.peerName.hashValue)
+        return palette[hash % max(palette.count, 1)]
+    }
+
+    private var lastMessage: String {
+        stored.messages.last?.text ?? "No messages"
+    }
 
     var body: some View {
         HStack(spacing: 12) {
             ZStack(alignment: .bottomTrailing) {
                 Circle()
-                    .fill(conversation.avatarColor.opacity(0.25))
+                    .fill(avatarColor.opacity(0.25))
                     .frame(width: 52, height: 52)
                     .overlay(
-                        Text(String(conversation.name.prefix(1)))
+                        Text(String(stored.peerName.prefix(1)))
                             .font(.system(size: 21, weight: .semibold))
-                            .foregroundColor(conversation.avatarColor)
+                            .foregroundStyle(avatarColor)
                     )
-                if conversation.isOnline {
+                if isOnline {
                     Circle()
                         .fill(.green)
                         .frame(width: 14, height: 14)
-                        .overlay(
-                            Circle().stroke(Color(.systemBackground), lineWidth: 2)
-                        )
+                        .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 2))
                         .offset(x: 2, y: 2)
                 }
             }
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text(conversation.name)
+                    Text(stored.peerName)
                         .font(.system(size: 16, weight: .semibold))
                     Spacer()
-                    Text(conversation.time)
+                    Text(timeString)
                         .font(.system(size: 12))
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
-                HStack {
-                    Text(conversation.lastMessage)
+                HStack(spacing: 4) {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                    Text(lastMessage)
                         .font(.system(size: 14))
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
-                    Spacer()
-                    if conversation.unreadCount > 0 {
-                        Text("\(conversation.unreadCount)")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(width: 22, height: 22)
-                            .background(
-                                Circle()
-                                    .fill(Color(red: 0.15, green: 0.40, blue: 0.30))
-                            )
-                    }
                 }
             }
         }
@@ -93,4 +145,7 @@ struct ConversationRow: View {
 
 #Preview {
     ChatsView()
+        .environment(AppSettings())
+        .environmentObject(ChatStore())
+        .environmentObject(BluetoothManager())
 }

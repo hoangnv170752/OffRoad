@@ -7,14 +7,21 @@
 
 import SwiftUI
 
-struct Message: Identifiable {
-    let id = UUID()
+struct Message: Identifiable, Codable, Hashable {
+    let id: UUID
     let text: String
     let isFromMe: Bool
     let timestamp: Date
     let isImage: Bool
 
-    init(text: String, isFromMe: Bool, timestamp: Date = Date(), isImage: Bool = false) {
+    init(
+        id: UUID = UUID(),
+        text: String,
+        isFromMe: Bool,
+        timestamp: Date = Date(),
+        isImage: Bool = false
+    ) {
+        self.id = id
         self.text = text
         self.isFromMe = isFromMe
         self.timestamp = timestamp
@@ -23,7 +30,7 @@ struct Message: Identifiable {
 }
 
 struct Conversation: Identifiable {
-    let id = UUID()
+    let id: UUID
     let name: String
     let avatarColor: Color
     let isOnline: Bool
@@ -32,6 +39,28 @@ struct Conversation: Identifiable {
     let time: String
     let unreadCount: Int
     let messages: [Message]
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        avatarColor: Color,
+        isOnline: Bool,
+        isNearby: Bool,
+        lastMessage: String,
+        time: String,
+        unreadCount: Int,
+        messages: [Message]
+    ) {
+        self.id = id
+        self.name = name
+        self.avatarColor = avatarColor
+        self.isOnline = isOnline
+        self.isNearby = isNearby
+        self.lastMessage = lastMessage
+        self.time = time
+        self.unreadCount = unreadCount
+        self.messages = messages
+    }
 }
 
 extension Conversation {

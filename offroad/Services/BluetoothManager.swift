@@ -18,8 +18,11 @@ class BluetoothManager: NSObject, ObservableObject {
     @Published var permissionDenied = false
     @Published var isConnected = false
     @Published var activePeerName: String?
-    @Published var liveMessages: [Message] = []
+    @Published var activePeerId: UUID?
     @Published var lastErrorMessage: String?
+
+    /// Persistent encrypted store. Set by the host once `BluetoothManager` is created.
+    weak var chatStore: ChatStore?
 
     private var centralManager: CBCentralManager!
     private var peripheralManager: CBPeripheralManager!
@@ -80,6 +83,7 @@ class BluetoothManager: NSObject, ObservableObject {
         }
 
         activePeerName = device.name
+        activePeerId = device.peripheralId
         activePeripheral = peripheral
         activeWritableCharacteristic = nil
         peripheral.delegate = self
@@ -117,19 +121,22 @@ class BluetoothManager: NSObject, ObservableObject {
         }
     }
 
-    func clearLiveMessages() {
-        liveMessages.removeAll()
-    }
-
     private func appendOutgoingMessage(_ text: String) {
-        DispatchQueue.main.async {
-            self.liveMessages.append(Message(text: text, isFromMe: true, timestamp: Date()))
-        }
+        persistMessage(text: text, isFromMe: true)
     }
 
     private func appendIncomingMessage(_ text: String) {
+        persistMessage(text: text, isFromMe: false)
+    }
+
+    private func persistMessage(text: String, isFromMe: Bool) {
+        let snapshotPeerId = activePeerId ?? activePeripheral?.identifier
+        let snapshotPeerName = activePeerName ?? "Nearby device"
+        let message = Message(text: text, isFromMe: isFromMe, timestamp: Date())
+
         DispatchQueue.main.async {
-            self.liveMessages.append(Message(text: text, isFromMe: false, timestamp: Date()))
+            guard let peerId = snapshotPeerId else { return }
+            self.chatStore?.append(message, peerId: peerId, peerName: snapshotPeerName)
         }
     }
 
@@ -176,6 +183,7 @@ class BluetoothManager: NSObject, ObservableObject {
         DispatchQueue.main.async {
             self.isConnected = false
             self.activePeerName = nil
+            self.activePeerId = nil
             self.activeWritableCharacteristic = nil
             self.activePeripheral = nil
             self.discoveredDevices = self.discoveredDevices.map { device in
